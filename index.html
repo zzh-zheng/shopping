@@ -64,6 +64,16 @@ button.danger{color:var(--bad)}
 .tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
 .tools button{font-size:.85rem}
 .note{color:var(--muted);font-size:.78rem;margin-top:8px}
+.syncbar{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--surface);
+  border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:.85rem}
+.s-ok{color:var(--ok)}.s-bad{color:var(--bad)}
+input[type=password],textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg);color:var(--ink);font:inherit;font-size:1rem}
+textarea{font-size:.85rem;margin:6px 0 10px}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);width:min(92vw,420px);padding:16px}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog input{margin-bottom:8px}
+dialog .row{margin-top:8px}
 @media (max-width:480px){form{grid-template-columns:1fr}.sum b{font-size:1rem}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -71,6 +81,7 @@ button.danger{color:var(--bad)}
 <body>
 <div class="wrap">
   <h1>網購記錄</h1>
+  <div class="syncbar"><span id="syncTxt">只存在這支瀏覽器</span><button id="syncBtn" type="button">雲端同步</button></div>
 
   <div class="sum">
     <div><small>總金額</small><b id="sTotal">0</b></div>
@@ -125,10 +136,36 @@ button.danger{color:var(--bad)}
     <button id="impBtn">匯入備份</button>
     <input type="file" id="impFile" accept=".json,application/json" hidden>
   </div>
-  <p class="note">資料存在這支瀏覽器裡，換手機或清除瀏覽資料前請先備份。</p>
+  <p class="note">資料會先存在這支瀏覽器；登入雲端後會在各裝置同步，仍建議偶爾備份。</p>
 </div>
 
-<script>
+<dialog id="dlg">
+  <div id="vCfg">
+    <b>貼上 Firebase 設定</b>
+    <p class="note">Firebase 主控台 → 專案設定 → 你的應用程式（網頁）→ 複製 firebaseConfig 整段貼上。</p>
+    <textarea id="cfgTxt" rows="7" placeholder='{ apiKey: "…", authDomain: "…", projectId: "…", appId: "…" }'></textarea>
+    <div class="row"><button class="primary" id="cfgSave">儲存設定</button><button class="dclose">關閉</button></div>
+  </div>
+  <div id="vAuth" hidden>
+    <b>登入雲端帳號</b>
+    <label for="em">Email</label>
+    <input type="text" id="em" inputmode="email" autocomplete="username">
+    <label for="pw">密碼（至少 6 碼）</label>
+    <input type="password" id="pw" autocomplete="current-password">
+    <p class="note s-bad" id="dErr"></p>
+    <div class="row"><button class="primary" id="doLogin">登入</button><button id="doReg">註冊新帳號</button><button class="dclose">關閉</button></div>
+    <p class="note"><a href="#" id="chgCfg">更換 Firebase 設定</a></p>
+  </div>
+  <div id="vAcc" hidden>
+    <b>已登入雲端</b>
+    <p id="accMail"></p>
+    <div class="row"><button id="doOut">登出</button><button class="dclose">關閉</button></div>
+  </div>
+</dialog>
+
+<script type="module">
+// 想讓所有裝置免貼設定：把 Firebase 的 firebaseConfig 物件貼在下一行（取代 null）
+const FIREBASE_CONFIG = null;
 const KEY = "shopping-tracker-v1";
 let items = [];
 let filter = "all";
@@ -218,12 +255,8 @@ $("f").addEventListener("submit", e => {
     alert("到貨日不能早於下單日。");
     return;
   }
-  if(editId){
-    items = items.map(i => i.id===editId ? {...i, ...data} : i);
-  } else {
-    items.push({id: Date.now(), ...data});
-  }
-  save(); resetForm(); render();
+  upsert(editId ? {...items.find(i=>i.id===editId), ...data} : {id: Date.now(), ...data});
+  resetForm();
 });
 
 $("cancelBtn").addEventListener("click", resetForm);
@@ -235,9 +268,9 @@ $("list").addEventListener("click", e => {
   const it = items.find(i=>i.id===id);
   if(!it) return;
   const a = b.dataset.a;
-  if(a==="pay"){ it.paid = !it.paid; save(); render(); }
-  else if(a==="arrive"){ it.arrival = today() < it.order ? it.order : today(); save(); render(); }
-  else if(a==="del"){ if(confirm("確定刪除「" + it.name + "」？")){ items = items.filter(i=>i.id!==id); save(); render(); } }
+  if(a==="pay"){ upsert({...it, paid: !it.paid}); }
+  else if(a==="arrive"){ upsert({...it, arrival: today() < it.order ? it.order : today()}); }
+  else if(a==="del"){ if(confirm("確定刪除「" + it.name + "」？")){ remove(id); } }
   else if(a==="edit"){
     editId = id;
     $("name").value = it.name; $("amount").value = it.amount; $("pay").value = it.pay;
@@ -282,18 +315,143 @@ $("impFile").addEventListener("change", e => {
       const data = JSON.parse(r.result);
       if(!Array.isArray(data)) throw 0;
       if(!confirm("匯入會取代目前的 " + items.length + " 筆資料，確定嗎？")) return;
-      items = data.map((i,n)=>({
+      const arr = data.map((i,n)=>({
         id: i.id || Date.now()+n, name: String(i.name||""), amount: Number(i.amount)||0,
         pay: i.pay||"其他", paid: !!i.paid, order: i.order||today(), arrival: i.arrival||""
       }));
-      save(); render();
+      replaceAll(arr);
     } catch(err){ alert("這不是有效的備份檔。"); }
   };
   r.readAsText(file);
   e.target.value = "";
 });
 
+let cloud = null, fb = null, ready = null, unsub = null;
+const ref = id => cloud.fn.doc(cloud.db, "users", cloud.uid, "purchases", String(id));
+const CFG_KEY = "shopping-fb-config";
+function getCfg(){
+  if(FIREBASE_CONFIG) return FIREBASE_CONFIG;
+  try { return JSON.parse(localStorage.getItem(CFG_KEY)); } catch(e){ return null; }
+}
+function setStatus(t, cls){ $("syncTxt").textContent = t; $("syncTxt").className = cls || ""; }
+function syncErr(e){
+  const m = e.code === "permission-denied" ? "沒有權限，請檢查 Firestore 規則" : (e.code || e.message);
+  setStatus("同步失敗：" + m, "s-bad");
+}
+
+function upsert(it){
+  items = items.some(i=>i.id===it.id) ? items.map(i=>i.id===it.id ? it : i) : items.concat(it);
+  save(); render();
+  if(cloud) cloud.fn.setDoc(ref(it.id), it).catch(syncErr);
+}
+function remove(id){
+  items = items.filter(i=>i.id!==id);
+  save(); render();
+  if(cloud) cloud.fn.deleteDoc(ref(id)).catch(syncErr);
+}
+function replaceAll(arr){
+  const old = items;
+  items = arr; save(); render();
+  if(!cloud) return;
+  arr.forEach(i => cloud.fn.setDoc(ref(i.id), i).catch(syncErr));
+  old.filter(o=>!arr.some(i=>i.id===o.id)).forEach(o => cloud.fn.deleteDoc(ref(o.id)).catch(syncErr));
+}
+
+function startSync(user){
+  const F = fb.F, localAtLogin = items.slice();
+  let first = true;
+  cloud = {fn: F, db: fb.db, uid: user.uid};
+  setStatus("同步中…");
+  unsub = F.onSnapshot(F.collection(fb.db, "users", user.uid, "purchases"), snap => {
+    const remote = snap.docs.map(d => d.data());
+    if(first){
+      first = false;
+      const ids = new Set(remote.map(r=>r.id));
+      const extra = localAtLogin.filter(l=>!ids.has(l.id));
+      extra.forEach(l => F.setDoc(ref(l.id), l).catch(syncErr));
+      items = remote.concat(extra);
+    } else {
+      items = remote;
+    }
+    save(); render();
+    setStatus("已同步 · " + user.email, "s-ok");
+  }, syncErr);
+}
+
+async function connect(cfg){
+  setStatus("連線中…");
+  const base = "https://www.gstatic.com/firebasejs/10.14.1/";
+  const [app, A, F] = await Promise.all([
+    import(base + "firebase-app.js"), import(base + "firebase-auth.js"), import(base + "firebase-firestore.js")]);
+  const a = app.getApps().length ? app.getApps()[0] : app.initializeApp(cfg);
+  fb = {A, F, auth: A.getAuth(a), db: F.getFirestore(a)};
+  A.onAuthStateChanged(fb.auth, user => {
+    if(unsub){ unsub(); unsub = null; }
+    if(user) startSync(user);
+    else { cloud = null; setStatus("尚未登入雲端"); }
+  });
+}
+
+function parseCfg(t){
+  try {
+    const from = t.indexOf("{", Math.max(0, t.indexOf("firebaseConfig")));
+    const s = t.slice(from, t.lastIndexOf("}") + 1)
+      .replace(/([{,]\s*)([A-Za-z_]\w*)\s*:/g, '$1"$2":').replace(/,\s*}/g, "}");
+    return JSON.parse(s);
+  } catch(e){ return null; }
+}
+function errMsg(e){
+  return ({
+    "auth/invalid-credential": "帳號或密碼錯誤",
+    "auth/invalid-email": "Email 格式不對",
+    "auth/email-already-in-use": "這個 Email 已註冊，請直接登入",
+    "auth/weak-password": "密碼至少要 6 碼",
+    "auth/operation-not-allowed": "Firebase 尚未開啟「電子郵件/密碼」登入",
+    "auth/network-request-failed": "網路連線失敗"
+  })[e.code] || (e.code || e.message);
+}
+
+function showDlg(){
+  const cfg = getCfg();
+  $("vCfg").hidden = !!cfg;
+  $("vAuth").hidden = !cfg || !!cloud;
+  $("vAcc").hidden = !cloud;
+  $("chgCfg").hidden = !!FIREBASE_CONFIG;
+  if(cloud) $("accMail").textContent = fb.auth.currentUser.email;
+  $("dErr").textContent = "";
+  $("dlg").showModal();
+}
+async function authDo(reg){
+  $("dErr").textContent = "";
+  try {
+    await ready;
+    const A = fb.A;
+    await (reg ? A.createUserWithEmailAndPassword : A.signInWithEmailAndPassword)(fb.auth, $("em").value.trim(), $("pw").value);
+    $("pw").value = "";
+    $("dlg").close();
+  } catch(e){ $("dErr").textContent = errMsg(e); }
+}
+
+$("syncBtn").addEventListener("click", showDlg);
+document.querySelectorAll(".dclose").forEach(b => b.addEventListener("click", () => $("dlg").close()));
+$("cfgSave").addEventListener("click", () => {
+  const cfg = parseCfg($("cfgTxt").value);
+  if(!cfg || !cfg.apiKey || !cfg.projectId){ alert("格式不對，請貼上完整的 firebaseConfig。"); return; }
+  try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch(e){}
+  $("dlg").close();
+  ready = connect(cfg).catch(syncErr);
+});
+$("chgCfg").addEventListener("click", e => {
+  e.preventDefault();
+  try { localStorage.removeItem(CFG_KEY); } catch(err){}
+  location.reload();
+});
+$("doLogin").addEventListener("click", () => authDo(false));
+$("doReg").addEventListener("click", () => authDo(true));
+$("doOut").addEventListener("click", () => { fb.A.signOut(fb.auth); $("dlg").close(); });
+
 load(); resetForm(); render();
+{ const cfg = getCfg(); if(cfg) ready = connect(cfg).catch(syncErr); }
 </script>
 </body>
 </html>
