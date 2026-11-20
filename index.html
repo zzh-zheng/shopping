@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>網購記錄</title>
+<style>
+:root{
+  --bg:#EEF1F4; --surface:#FFFFFF; --ink:#17212B; --muted:#5F6B78; --line:#D5DBE2;
+  --kraft:#B98B52; --ok:#2F7D5B; --bad:#C4423A; --accent:#1F4E79; --accent-ink:#FFFFFF;
+  --chip-ok:#DDF0E6; --chip-bad:#F8E1DF; --chip-wait:#F3E8D6;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#10161C; --surface:#18212A; --ink:#E8EDF2; --muted:#9AA7B4; --line:#2B3744;
+    --kraft:#D2A56B; --ok:#5CC49A; --bad:#EE7A72; --accent:#6FA8DC; --accent-ink:#0E1620;
+    --chip-ok:#1C3A2E; --chip-bad:#44211F; --chip-wait:#3A2F1D;
+  }
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:12px}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  line-height:1.55;padding:16px 14px 60px}
+.wrap{max-width:720px;margin:0 auto}
+h1{font-size:1.5rem;margin:4px 0 14px;letter-spacing:.02em}
+.sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.sum div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.sum small{display:block;color:var(--muted);font-size:.78rem}
+.sum b{font-size:1.15rem;font-variant-numeric:tabular-nums}
+.sum .warn b{color:var(--bad)}
+form,.item{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+form{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;border-top:4px solid var(--kraft)}
+form .full{grid-column:1/-1}
+label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:3px}
+input[type=text],input[type=number],input[type=date],select{
+  width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg);color:var(--ink);font:inherit;font-size:1rem}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.check{display:flex;align-items:center;gap:8px;font-size:1rem;color:var(--ink);margin:0;padding-top:22px}
+.check input{width:20px;height:20px}
+button{font:inherit;cursor:pointer;border-radius:7px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);padding:8px 12px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button.danger{color:var(--bad)}
+.actions{display:flex;gap:8px}
+.actions .primary{flex:1}
+.tabs{display:flex;gap:6px;margin:6px 0 10px;flex-wrap:wrap}
+.tabs button{padding:6px 12px;font-size:.9rem}
+.tabs button[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.item{margin-bottom:10px}
+.top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.name{font-weight:600;word-break:break-all}
+.name a{color:var(--accent)}
+.price{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.meta{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;font-size:.82rem}
+.chip{padding:2px 9px;border-radius:99px;background:var(--bg);border:1px solid var(--line);color:var(--muted)}
+.chip.ok{background:var(--chip-ok);border-color:transparent;color:var(--ok)}
+.chip.bad{background:var(--chip-bad);border-color:transparent;color:var(--bad)}
+.chip.wait{background:var(--chip-wait);border-color:transparent;color:var(--kraft)}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+.row button{padding:5px 10px;font-size:.85rem}
+.empty{text-align:center;color:var(--muted);padding:30px 10px;border:1px dashed var(--line);border-radius:10px}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+.tools button{font-size:.85rem}
+.note{color:var(--muted);font-size:.78rem;margin-top:8px}
+@media (max-width:480px){form{grid-template-columns:1fr}.sum b{font-size:1rem}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>網購記錄</h1>
+
+  <div class="sum">
+    <div><small>總金額</small><b id="sTotal">0</b></div>
+    <div class="warn"><small>未付款金額</small><b id="sUnpaid">0</b></div>
+    <div><small>還沒到貨</small><b id="sWait">0 件</b></div>
+  </div>
+
+  <form id="f">
+    <div class="full">
+      <label for="name">商品名稱或網址</label>
+      <input type="text" id="name" required placeholder="例：藍牙耳機 或 https://…">
+    </div>
+    <div>
+      <label for="amount">總金額</label>
+      <input type="number" id="amount" required min="0" step="1" inputmode="numeric" placeholder="0">
+    </div>
+    <div>
+      <label for="pay">付款方式</label>
+      <select id="pay">
+        <option>信用卡</option><option>LINE Pay</option><option>街口支付</option>
+        <option>iPASS MONEY</option><option>轉帳</option><option>貨到付款</option>
+        <option>超商取貨付款</option><option>其他</option>
+      </select>
+    </div>
+    <div>
+      <label for="od">下單日</label>
+      <input type="date" id="od" required>
+    </div>
+    <div>
+      <label for="ad">到貨日（還沒到可留空）</label>
+      <input type="date" id="ad">
+    </div>
+    <label class="check full"><input type="checkbox" id="paid"> 已付款</label>
+    <div class="actions full">
+      <button type="submit" class="primary" id="saveBtn">新增</button>
+      <button type="button" id="cancelBtn" hidden>取消編輯</button>
+    </div>
+  </form>
+
+  <div class="tabs" id="tabs">
+    <button data-f="all" aria-pressed="true">全部</button>
+    <button data-f="unpaid" aria-pressed="false">未付款</button>
+    <button data-f="wait" aria-pressed="false">未到貨</button>
+    <button data-f="done" aria-pressed="false">已完成</button>
+  </div>
+
+  <div id="list"></div>
+
+  <div class="tools">
+    <button id="expCsv">匯出 CSV</button>
+    <button id="expJson">備份 JSON</button>
+    <button id="impBtn">匯入備份</button>
+    <input type="file" id="impFile" accept=".json,application/json" hidden>
+  </div>
+  <p class="note">資料存在這支瀏覽器裡，換手機或清除瀏覽資料前請先備份。</p>
+</div>
+
+<script>
+const KEY = "shopping-tracker-v1";
+let items = [];
+let filter = "all";
+let editId = null;
+
+const $ = id => document.getElementById(id);
+const today = () => {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+};
+const money = n => "NT$ " + Number(n).toLocaleString("zh-TW");
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function load(){
+  try { items = JSON.parse(localStorage.getItem(KEY)) || []; } catch(e){ items = []; }
+}
+function save(){
+  try { localStorage.setItem(KEY, JSON.stringify(items)); }
+  catch(e){ alert("無法儲存資料，請先用「備份 JSON」把資料存下來。"); }
+}
+
+function nameHtml(n){
+  return /^https?:\/\//i.test(n)
+    ? '<a href="' + esc(n) + '" target="_blank" rel="noopener noreferrer">' + esc(n) + '</a>'
+    : esc(n);
+}
+
+function render(){
+  const total = items.reduce((s,i)=>s+i.amount,0);
+  const unpaid = items.filter(i=>!i.paid).reduce((s,i)=>s+i.amount,0);
+  const wait = items.filter(i=>!i.arrival).length;
+  $("sTotal").textContent = money(total);
+  $("sUnpaid").textContent = money(unpaid);
+  $("sWait").textContent = wait + " 件";
+
+  const shown = items
+    .filter(i => filter==="all" || (filter==="unpaid" && !i.paid) ||
+      (filter==="wait" && !i.arrival) || (filter==="done" && i.paid && i.arrival))
+    .sort((a,b)=> b.order.localeCompare(a.order) || b.id - a.id);
+
+  if(!shown.length){
+    $("list").innerHTML = '<div class="empty">' +
+      (items.length ? "這個分類目前沒有商品" : "還沒有記錄，從上面新增第一筆吧") + '</div>';
+    return;
+  }
+  $("list").innerHTML = shown.map(i => `
+    <div class="item">
+      <div class="top">
+        <div class="name">${nameHtml(i.name)}</div>
+        <div class="price">${money(i.amount)}</div>
+      </div>
+      <div class="meta">
+        <span class="chip">${esc(i.pay)}</span>
+        <span class="chip ${i.paid?"ok":"bad"}">${i.paid?"已付款":"未付款"}</span>
+        <span class="chip">下單 ${esc(i.order)}</span>
+        <span class="chip ${i.arrival?"ok":"wait"}">${i.arrival?"到貨 "+esc(i.arrival):"未到貨"}</span>
+      </div>
+      <div class="row">
+        <button data-a="pay" data-id="${i.id}">${i.paid?"改成未付款":"標記已付款"}</button>
+        ${i.arrival?"":`<button data-a="arrive" data-id="${i.id}">今天到貨</button>`}
+        <button data-a="edit" data-id="${i.id}">編輯</button>
+        <button class="danger" data-a="del" data-id="${i.id}">刪除</button>
+      </div>
+    </div>`).join("");
+}
+
+function resetForm(){
+  $("f").reset();
+  $("od").value = today();
+  editId = null;
+  $("saveBtn").textContent = "新增";
+  $("cancelBtn").hidden = true;
+}
+
+$("f").addEventListener("submit", e => {
+  e.preventDefault();
+  const data = {
+    name: $("name").value.trim(),
+    amount: Math.round(Number($("amount").value)) || 0,
+    pay: $("pay").value,
+    paid: $("paid").checked,
+    order: $("od").value,
+    arrival: $("ad").value
+  };
+  if(!data.name) return;
+  if(data.arrival && data.arrival < data.order){
+    alert("到貨日不能早於下單日。");
+    return;
+  }
+  if(editId){
+    items = items.map(i => i.id===editId ? {...i, ...data} : i);
+  } else {
+    items.push({id: Date.now(), ...data});
+  }
+  save(); resetForm(); render();
+});
+
+$("cancelBtn").addEventListener("click", resetForm);
+
+$("list").addEventListener("click", e => {
+  const b = e.target.closest("button[data-a]");
+  if(!b) return;
+  const id = Number(b.dataset.id);
+  const it = items.find(i=>i.id===id);
+  if(!it) return;
+  const a = b.dataset.a;
+  if(a==="pay"){ it.paid = !it.paid; save(); render(); }
+  else if(a==="arrive"){ it.arrival = today() < it.order ? it.order : today(); save(); render(); }
+  else if(a==="del"){ if(confirm("確定刪除「" + it.name + "」？")){ items = items.filter(i=>i.id!==id); save(); render(); } }
+  else if(a==="edit"){
+    editId = id;
+    $("name").value = it.name; $("amount").value = it.amount; $("pay").value = it.pay;
+    $("paid").checked = it.paid; $("od").value = it.order; $("ad").value = it.arrival || "";
+    $("saveBtn").textContent = "儲存修改";
+    $("cancelBtn").hidden = false;
+    $("f").scrollIntoView({behavior:"smooth", block:"start"});
+  }
+});
+
+$("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-f]");
+  if(!b) return;
+  filter = b.dataset.f;
+  document.querySelectorAll("#tabs button").forEach(x => x.setAttribute("aria-pressed", x===b));
+  render();
+});
+
+function download(name, text, type){
+  const blob = new Blob([text], {type});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+$("expCsv").addEventListener("click", () => {
+  const q = v => '"' + String(v).replace(/"/g,'""') + '"';
+  const rows = [["商品名稱或網址","總金額","付款方式","是否付錢","下單日","到貨日"]]
+    .concat(items.map(i=>[i.name,i.amount,i.pay,i.paid?"是":"否",i.order,i.arrival||""]));
+  download("網購記錄-" + today() + ".csv", "\ufeff" + rows.map(r=>r.map(q).join(",")).join("\n"), "text/csv");
+});
+$("expJson").addEventListener("click", () =>
+  download("網購備份-" + today() + ".json", JSON.stringify(items, null, 2), "application/json"));
+$("impBtn").addEventListener("click", () => $("impFile").click());
+$("impFile").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const data = JSON.parse(r.result);
+      if(!Array.isArray(data)) throw 0;
+      if(!confirm("匯入會取代目前的 " + items.length + " 筆資料，確定嗎？")) return;
+      items = data.map((i,n)=>({
+        id: i.id || Date.now()+n, name: String(i.name||""), amount: Number(i.amount)||0,
+        pay: i.pay||"其他", paid: !!i.paid, order: i.order||today(), arrival: i.arrival||""
+      }));
+      save(); render();
+    } catch(err){ alert("這不是有效的備份檔。"); }
+  };
+  r.readAsText(file);
+  e.target.value = "";
+});
+
+load(); resetForm(); render();
+</script>
+</body>
+</html>
